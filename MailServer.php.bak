@@ -1,0 +1,78 @@
+<?php
+class Server
+{
+    private $serv;
+    public function __construct() {
+        $this->serv = new swoole_server("0.0.0.0", 9501);
+        $this->serv->set(array(
+            'ractor_num'    => 2,    //主进程中线程数量
+            'worker_num' => 4,   //一般设置为服务器CPU数的1-4倍
+            'daemonize' => false,   //是否守护进程
+            'max_request' => 10000,
+            'dispatch_mode' => 2,  //1平均分配，2按FD取摸固定分配，3抢占式分配，默认为取模(dispatch=2)'
+            'debug_mode'=> 1,
+            'task_worker_num' => 4,  //task进程的数量
+            "task_ipc_mode " => 3 ,  //使用消息队列通信，并设置为争抢模式
+            "log_file" => "./MailSwoole.log" ,//日志
+        ));
+        $this->serv->on('Receive', array($this, 'onReceive'));
+        // bind callback
+        $this->serv->on('Task', array($this, 'onTask'));
+        $this->serv->on('Finish', array($this, 'onFinish'));
+        $this->serv->start();
+    }
+    public function onReceive( swoole_server $serv, $fd, $from_id, $data ) {
+        //echo "Get Message From Client {$fd}:{$data}\n";
+	//file_put_contents ( './swooleReceive.log',$data."\n", FILE_APPEND );
+        /*if( $data ){
+	  $tmp_arr = json_decode ($data,true);
+	  $tmp_arr['fd'] = $fd;
+          $serv->task( json_encode($tmp_arr) ); 
+	}*/
+	// send a task to task worker.
+	$serv->task( $data );
+    }
+    public function onTask($serv,$task_id,$from_id, $data) {
+	file_put_contents ( './swooleTask.log',$data."\n", FILE_APPEND );
+        $array = json_decode( $data , true );
+	$param = json_encode( $array['param'] );
+	//$param = '';
+	echo "task_id {$task_id}, request_url {$array['url']}, request_param {$param} \n";
+        if ($array['url']) {
+           $curl_res = $this->httpGet( $array['url'] , $array['param']  );
+	   $array['status'] = $curl_res;
+	   $return = json_encode($array);
+           //$serv->send($array['fd'],"Task_id {$task_id} exec Task result {$return}");
+	   return "{$return} ";
+        }else{
+	   file_put_contents ( './swooleNoTask.log',$data."\n", FILE_APPEND );
+	}
+    }
+    public function onFinish($serv,$task_id, $data) {
+        //echo "Task {$task_id} finishn";
+        //echo "Result: {$data}n";
+	$msg = "Task_id {$task_id} exec Task result {$data} \n ";
+	include_once('./RedisCluster.php');
+        $redis = new RedisCluster();
+        $redis->connect(array('host'=>'172.16.0.126','port'=>6379));
+	$redis->rpush('orderTaskFinish',$msg);
+	file_put_contents ( './swooleFinish.log',$data."\n", FILE_APPEND );
+        //$serv->send(1,"Task_id {$task_id} exec Task result {$data}");
+    }
+    protected function httpGet($url,$data){
+	return rand(0,1000);
+        if ($data) {
+            $url .='?'.http_build_query($data) ;
+        }
+        $curlObj = curl_init();    //初始化curl，
+        curl_setopt($curlObj, CURLOPT_URL, $url);   //设置网址
+        curl_setopt($curlObj, CURLOPT_RETURNTRANSFER, 1);  //将curl_exec的结果返回
+        curl_setopt($curlObj, CURLOPT_SSL_VERIFYPEER, FALSE);
+        curl_setopt($curlObj, CURLOPT_SSL_VERIFYHOST, FALSE);   
+        curl_setopt($curlObj, CURLOPT_HEADER, 0);         //是否输出返回头信息
+        $response = curl_exec($curlObj);   //执行
+        curl_close($curlObj);          //关闭会话
+        return $response;
+    }
+}
+$server = new Server();

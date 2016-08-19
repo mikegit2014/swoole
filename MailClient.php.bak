@@ -1,0 +1,67 @@
+<?php
+class Client
+{
+    private $client;
+    public function __construct() {
+        $this->client = new swoole_client(SWOOLE_SOCK_TCP);
+	$this->client->on('Connect', array($this, 'onConnect'));
+        $this->client->on('Receive', array($this, 'onReceive'));
+        $this->client->on('Close', array($this, 'onClose'));
+        $this->client->on('Error', array($this, 'onError'));
+	//$this->client->on('Receive', array($this, 'onReceive'));
+    
+     }
+    public function connect() {
+        if( !$this->client->connect("127.0.0.1", 9501 , 1) ) {
+            echo "Connect Error";
+        }
+        include_once('./RedisCluster.php');
+        $redis = new RedisCluster();
+        $redis->connect(array('host'=>'172.16.0.126','port'=>6379));
+	//$len =  $redis->llen('orderTask');
+	//file_put_contents ( './swoole.log',$len, FILE_APPEND );
+	$json = $redis->lranges('orderTask',0,1);
+	$json_res = $json[0];
+	$arr = json_decode($json_res,true);
+	//file_put_contents ( './swoole.log',$json_res, FILE_APPEND );
+	foreach($arr as $k_y => $val){
+	     file_put_contents ( './swoole.log',$val['url']."\n", FILE_APPEND );
+	     $this->client->send( json_encode($val) );
+	}
+	//file_put_contents ( './swoole.log',$len[0] FILE_APPEND );
+        //$this->client->send( $json_data );
+	
+    }
+  public function onReceive( $cli, $data ) {
+    echo "Get Message From Server: {$data}\n";
+  }
+    public function onConnect( $cli) {
+	include_once('./RedisCluster.php');
+          $redis = new RedisCluster();
+          $redis->connect(array('host'=>'172.16.0.126','port'=>6379));
+          //$len =  $redis->llen('orderTask');
+          //file_put_contents ( './swoole.log',$len, FILE_APPEND );
+          $json = $redis->lranges('orderTask',0,1);
+          $json_res = $json[0];
+          $arr = json_decode($json_res,true);
+          file_put_contents ( './swoole.log',count($arr), FILE_APPEND );
+          foreach($arr as $k_y => $val){
+              // file_put_contents ( './swoole.log',$val['url']."\n", FILE_APPEND );
+               $this->client->send( json_encode($val) );
+          }
+
+  }
+  public function onClose( $cli) {
+      echo "Client close connection\n";
+  }
+  public function onError() {
+  }
+  public function send($data) {
+  	$this->client->send( $data );
+  }
+  public function isConnected() {
+  	return $this->client->isConnected();
+  }
+}
+$client = new Client();
+$client->connect();
