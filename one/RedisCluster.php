@@ -1,5 +1,4 @@
 <?php
-namespace Tool\qrcode;
 /**
  * Redis 操作，支持 Master/Slave 的负载集群
  */

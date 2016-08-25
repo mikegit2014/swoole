@@ -3,41 +3,33 @@ class AdminMsgTaskServer
 {
     private $serv;
     private $redis;
-    private $jpush;
     private $jp_app_key;
     private $jp_master_secret;
     private $callbackUrl;
-    private $listenPort;
-    private $dir;
     public function __construct() {
-        $this->listenPort = 9501;
-        $this->dir = '/home/shenruiqing/php-shell/';
-        $this->serv = new swoole_server("0.0.0.0", $this->listenPort);
+        $this->serv = new swoole_server("0.0.0.0", 9501);
         $this->serv->set(array(
             'ractor_num'    => 2,    //主进程中线程数量
             'worker_num' => 2,   //一般设置为服务器CPU数的1-4倍
-            'daemonize' => true,   //是否守护进程
+            'daemonize' => false,   //是否守护进程
             'max_request' => 10000,
             'dispatch_mode' => 2,  //1平均分配，2按FD取摸固定分配，3抢占式分配，默认为取模(dispatch=2)'
             'debug_mode'=> true,
             'task_worker_num' => 2,  //task进程的数量 防止超过极光推送的600/min的限制
             "task_ipc_mode " => 3 ,  //使用消息队列通信，并设置为争抢模式
-            "log_file" => "{$this->dir}MsgTaskSwoole.log" ,//日志
+            "log_file" => "./MsgTaskSwoole.log" ,//日志
         ));
         //需要根据环境更改
         $redisIp = '172.16.0.126';
         $redisPort = 6379;
-        $this->jp_app_key = 'dd4eae631f5666200f5e1c6b';
-		$this->jp_master_secret = '1ad02ecb7f9e73380df4da64';
-        $this->callbackUrl = 'http://admint.dianlf.com/Api/MessageCallBack/writeToBase';
+        $this->jp_app_key = 'bb8a38ffc8b122079e71495b';
+		$this->jp_master_secret = 'a7bfe23deee35c6d983704e4';
+        $this->callbackUrl = 'http://dianlfbradmin.bongv.com/Api/MessageCallBack/writeToBase';
 
         include_once('./RedisCluster.php');
         $this->redis = new RedisCluster();
-        include_once('./JPush.php');
-        $this->jpush = new JPush( $this->jp_app_key, $this->jp_master_secret );
         $this->redis->connect(array('host'=>$redisIp,'port'=>$redisPort));
-        $this->serv->on('Start', array($this, 'onStart'));
-	    $this->serv->on('Manager', array($this, 'onManagerStart'));
+	    $this->serv->on('Start', array($this, 'onStart'));
         $this->serv->on('Connect', array($this, 'onConnect'));
         $this->serv->on('Receive', array($this, 'onReceive'));
         // bind callback
@@ -46,14 +38,11 @@ class AdminMsgTaskServer
         $this->serv->start();
     }
     public function onStart( $serv ) {
-	    swoole_set_process_name("msgTask running tcp://0.0.0.0:{$this->listenPort} master:" . $serv->master_pid);
+        echo "start\n";
         $this->write_log('swoole--start');
     }
-    public function onManagerStart( $serv ){
-    	swoole_set_process_name("msgTask manager:" . $serv->manager_pid);
-    	$this->write_log('swoole--onManagerStart');
-    }
     public function onConnect( $serv, $fd, $from_id ) {
+        echo "connect\n";
         $this->write_log("Client {$fd} connect  form_id {$from_id}");
     }
     public function onReceive( $serv, $fd, $from_id, $data ) {
@@ -84,7 +73,7 @@ class AdminMsgTaskServer
             $next = $this->redis->lpop('messageTask');
             if($next){
                 $client = new \swoole_client(SWOOLE_SOCK_TCP);
-                if(!$client->connect("127.0.0.1",$this->listenPort,1)){
+                if(!$client->connect("127.0.0.1",9501,1)){
                     $this->write_log("Swoole Connect Error ");
                 }
                 $sendRes = $client->send( $next );
@@ -107,10 +96,12 @@ class AdminMsgTaskServer
 	 * return is array
 	*/
     protected function JPushMsg( $pushArr ){
+    	include_once('./JPush.php');
+    	$jpush = new JPush( $this->jp_app_key, $this->jp_master_secret );
     	$pData = array('msgid' => $pushArr['msgid']);
         $device = $pushArr['device'];
         $title = $pushArr['title'];
-    	$jRes = $this->jpush
+    	$jRes = $jpush
             ->setPlatform('ios', 'android')
             ->addAlias( $device )
             ->addAndroidNotification($title, $title, 1, $pData)
@@ -128,7 +119,7 @@ class AdminMsgTaskServer
         }
     }
     protected function write_log( $msg ) {
-	    $logFile = "{$this->dir}messageTaskLogs-".date ( 'Y-m-d' ) . '.log';
+	    $logFile = './messageTaskLogs-'.date ( 'Y-m-d' ) . '.log';
 	    if(is_array($msg)){
 	        $msg_info = '['.date ( 'Y-m-d H:i:s' ).']' . ' >>> '.stripslashes(var_export($msg, true));
 	    }else{
